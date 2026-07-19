@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>おこづかい計算システム + 均衡グラフ</title>
+<style>
+:root{
+  --bg: linear-gradient(135deg,#edf4ff,#dfeeff);
+  --card: #ffffff; --text: #222; --muted: #555; --primary: #0066cc;
+  --primary-hover: #004f9e; --border: #ddd; --accent-bg: #f8fbff;
+  --explain-bg: #f4f8ff; --explain-border: #0057b8;
+}
+[data-theme="dark"]{
+  --bg: linear-gradient(135deg,#0f172a,#1e293b);
+  --card: #1e293b; --text: #e2e8f0; --muted: #94a3b8; --primary: #3b82f6;
+  --primary-hover: #2563eb; --border: #334155; --accent-bg: #0f172a;
+  --explain-bg: #1e293b; --explain-border: #3b82f6;
+}
+*{ margin:0; padding:0; box-sizing:border-box; font-family:"Yu Gothic","Meiryo",sans-serif; }
+body{ background:var(--bg); color:var(--text); padding:30px; }
+.container{ max-width:950px; margin:auto; background:var(--card); border-radius:15px; padding:30px; box-shadow:0 10px 25px rgba(0,0,0,.25); }
+.header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+h1{ text-align:center; color:var(--primary); flex:1; }
+.theme-toggle{ padding:8px 14px; font-size:14px; background:var(--primary); color:white; border:none; border-radius:8px; cursor:pointer; }
+.theme-toggle:hover{ background:var(--primary-hover); }
+.subtitle{ text-align:center; margin-bottom:20px; color:var(--muted); }
+table{ width:100%; margin-bottom:20px; }
+td{ padding:10px; }
+input{ width:100%; padding:12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:16px; }
+button{ width:100%; padding:15px; font-size:18px; background:var(--primary); color:white; border:none; border-radius:8px; cursor:pointer; }
+button:hover{ background:var(--primary-hover); }
+#output{ margin-top:20px; background:var(--accent-bg); border-left:6px solid var(--primary); padding:20px; border-radius:8px; line-height:2; }
+.result{ display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border); }
+canvas{ width:100%; height:400px; background:var(--card); border:1px solid var(--border); border-radius:10px; margin-top:20px; }
+.explain{ margin-top:30px; padding:20px; background:var(--explain-bg); border-radius:10px; border-left:6px solid var(--explain-border); line-height:2; }
+.explain h2{ margin-bottom:15px; color:var(--primary); }
+footer{ margin-top:25px; text-align:center; font-size:13px; color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>おこづかい均衡計算システム</h1>
+    <button class="theme-toggle" onclick="toggleTheme()">テーマ切替</button>
+  </div>
+  <p class="subtitle"> P・g・T1・T2を入力し「計算」を押してください </p>
+  
+  <table>
+    <tr><td>P</td><td><input type="number" id="P" step="any" placeholder="親が渡すお金"></td></tr>
+    <tr><td>g</td><td><input type="number" id="g" step="any" placeholder="商品の基準価格"></td></tr>
+    <tr><td>T1</td><td><input type="number" id="T1" step="any" placeholder="お兄ちゃんの重み"></td></tr>
+    <tr><td>T2</td><td><input type="number" id="T2" step="any" placeholder="妹の重み"></td></tr>
+  </table>
+  
+  <button onclick="calculate()">計算してグラフ表示</button>
+  
+  <div id="output">計算結果がここへ表示されます。</div>
+  <canvas id="graph"></canvas>
+  
+  <div class="explain">
+    <h2>計算ロジック</h2>
+    <p>
+      1. お釣り <b>change = P - g</b> を重みで配分<br>
+      <b>brother = change * T1/(T1+T2)</b><br>
+      <b>sister = change * T2/(T1+T2)</b><br><br>
+      2. バランス基準価格<br>
+      <b>g1 = g * (1 + log(T1/T2))</b><br>
+      <b>g2 = g * (1 + log(T2/T1))</b><br><br>
+      3. 修正した1次関数<br>
+      <b>y1 = -(g1/g2) * x + g1</b> ← お兄ちゃん: 需要曲線 右下がり<br>
+      <b>y2 =  (g2/g1) * x + g2</b> ← 妹: 供給曲線 右上がり<br><br>
+      4. 交点が<b>均衡価格x* と均衡量y*</b>です
+    </p>
+  </div>
+  <footer> おこづかい計算システム Version 4.1 </footer>
+</div>
+
+<script>
+// テーマ切替
+function toggleTheme(){
+  const html = document.documentElement;
+  const next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  html.setAttribute("data-theme", next);
+  localStorage.setItem("sos-theme", next);
+}
+(function(){
+  const saved = localStorage.getItem("sos-theme");
+  if(saved){ document.documentElement.setAttribute("data-theme", saved); }
+  else if(window.matchMedia('(prefers-color-scheme: dark)').matches){
+    document.documentElement.setAttribute("data-theme", "dark");
+  }
+})();
+
+function calculate(){
+  const P = parseFloat(document.getElementById("P").value);
+  const g = parseFloat(document.getElementById("g").value);
+  const T1 = parseFloat(document.getElementById("T1").value);
+  const T2 = parseFloat(document.getElementById("T2").value);
+  
+  if([P,g,T1,T2].some(isNaN)){ alert("正しい数値を入力してください。"); return; }
+  if(T1 <= 0 || T2 <= 0 || g <= 0){ alert("T1, T2, gは0より大きい値を入力してください。"); return; }
+
+  // 1. お釣り配分
+  const change = P - g;
+  const total = T1 + T2;
+  const brother = change * T1 / total;
+  const sister = change * T2 / total;
+  
+  // 2. バランス基準
+  const x1 = Math.log(T1 / T2);
+  const x2 = Math.log(T2 / T1);
+  const g1 = g * (1 + x1);
+  const g2 = g * (1 + x2);
+  
+  // 3. 修正後の1次関数
+  const a1 = -(g1 / g2); // 右下がり
+  const b1 = g1;
+  const a2 =  (g2 / g1); // 右上がり
+  const b2 = g2;
+  
+  // 4. 交点 均衡価格
+  // a1*x + b1 = a2*x + b2  =>  x = (b2 - b1)/(a1 - a2)
+  const equilibriumX = (b2 - b1) / (a1 - a2);
+  const equilibriumY = a1 * equilibriumX + b1;
+
+  document.getElementById("output").innerHTML = `
+    <h2>計算結果</h2>
+    <div class="result"><span>お釣り</span><b>${change.toFixed(2)} 円</b></div>
+    <div class="result"><span>お兄ちゃんの取り分</span><b>${brother.toFixed(2)} 円</b></div>
+    <div class="result"><span>妹の取り分</span><b>${sister.toFixed(2)} 円</b></div>
+    <div class="result"><span>g1 基準価格</span><b>${g1.toFixed(2)}</b></div>
+    <div class="result"><span>g2 基準価格</span><b>${g2.toFixed(2)}</b></div>
+    <div class="result"><span>y1 需要曲線</span><b>y = ${a1.toFixed(4)}x + ${b1.toFixed(2)}</b></div>
+    <div class="result"><span>y2 供給曲線</span><b>y = ${a2.toFixed(4)}x + ${b2.toFixed(2)}</b></div>
+    <div class="result"><span>均衡価格 x*</span><b>${equilibriumX.toFixed(2)}</b></div>
+    <div class="result"><span>均衡量 y*</span><b>${equilibriumY.toFixed(2)}</b></div>
+  `;
+  
+  drawGraph(a1, b1, a2, b2, equilibriumX, equilibriumY);
+}
+
+// グラフ描画
+function drawGraph(a1, b1, a2, b2, ex, ey){
+  const canvas = document.getElementById("graph");
+  const ctx = canvas.getContext("2d");
+  canvas.width = canvas.clientWidth;
+  canvas.height = 400;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  
+  // 表示範囲を均衡点中心に自動調整
+  const margin = 200;
+  const xMin = ex - margin, xMax = ex + margin;
+  const yMin = ey - margin, yMax = ey + margin;
+  
+  const toX = x => (x - xMin) / (xMax - xMin) * canvas.width;
+  const toY = y => canvas.height - (y - yMin) / (yMax - yMin) * canvas.height;
+  
+  // 軸
+  ctx.strokeStyle = "#888"; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(toX(0), 0); ctx.lineTo(toX(0), canvas.height);
+  ctx.moveTo(0, toY(0)); ctx.lineTo(canvas.width, toY(0));
+  ctx.stroke();
+  
+  // y1 需要曲線 青
+  ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(toX(xMin), toY(a1*xMin + b1));
+  ctx.lineTo(toX(xMax), toY(a1*xMax + b1));
+  ctx.stroke();
+  
+  // y2 供給曲線 赤
+  ctx.strokeStyle = "#ef4444";
+  ctx.beginPath();
+  ctx.moveTo(toX(xMin), toY(a2*xMin + b2));
+  ctx.lineTo(toX(xMax), toY(a2*xMax + b2));
+  ctx.stroke();
+  
+  // 交点
+  ctx.fillStyle = "#22c55e";
+  ctx.beginPath();
+  ctx.arc(toX(ex), toY(ey), 7, 0, Math.PI*2);
+  ctx.fill();
+  
+  ctx.fillStyle = getComputedStyle(document.body).color;
+  ctx.font = "14px sans-serif";
+  ctx.fillText(`均衡点(${ex.toFixed(1)}, ${ey.toFixed(1)})`, toX(ex)+10, toY(ey)-10);
+  
+  // 凡例
+  ctx.fillStyle = "#3b82f6"; ctx.fillText("y1: お兄ちゃん 需要", 20, 30);
+  ctx.fillStyle = "#ef4444"; ctx.fillText("y2: 妹 供給", 20, 50);
+}
+</script>
+</body>
+</html>
